@@ -53,8 +53,17 @@ namespace Microsoft.Azure.Devices.E2ETests
         [TestMethod]
         [TestCategory("LongRunning")]
         [Timeout(120000)]
-        public async Task RegistryManager_ExportDevices()
+        [DataRow(StorageAuthenticationType.KeyBased)]
+        [DataRow(StorageAuthenticationType.IdentityBased)]
+        public async Task RegistryManager_ExportDevices(StorageAuthenticationType storageAuthenticationType)
         {
+            // Remove after removal of environment variable
+            if (storageAuthenticationType == StorageAuthenticationType.IdentityBased
+                && Environment.GetEnvironmentVariable("EnableStorageIdentity") != "1")
+            {
+                return;
+            }
+
             StorageContainer storageContainer = null;
             string deviceId = $"{nameof(RegistryManager_ExportDevices)}-{StorageContainer.GetRandomSuffix(4)}";
             var registryManager = RegistryManager.CreateFromConnectionString(Configuration.IoTHub.ConnectionString);
@@ -70,6 +79,10 @@ namespace Microsoft.Azure.Devices.E2ETests
                     .GetInstanceAsync(containerName)
                     .ConfigureAwait(false);
                 _log.WriteLine($"Using container {storageContainer.Uri}");
+
+                Uri containerUri = storageAuthenticationType == StorageAuthenticationType.KeyBased
+                    ? storageContainer.SasUri
+                    : storageContainer.Uri;
 
                 await registryManager
                     .AddDeviceAsync(
@@ -87,7 +100,12 @@ namespace Microsoft.Azure.Devices.E2ETests
                     try
                     {
                         exportJobResponse = await registryManager
-                           .ExportDevicesAsync(storageContainer.SasUri.ToString(), true)
+                           .ExportDevicesAsync(
+                            JobProperties.CreateForExportJob(
+                                storageContainer.SasUri.ToString(),
+                                true,
+                                null,
+                                storageAuthenticationType))
                            .ConfigureAwait(false);
                         break;
                     }
@@ -122,6 +140,7 @@ namespace Microsoft.Azure.Devices.E2ETests
                 bool foundDeviceInExport = false;
                 foreach (string serializedDeivce in serializedDevices)
                 {
+                    // The first line may be a comment to the user, so skip any lines that don't start with a json object initial character: curly brace
                     if (serializedDeivce[0] != '{')
                     {
                         continue;
@@ -153,8 +172,7 @@ namespace Microsoft.Azure.Devices.E2ETests
         {
             BlobClient exportFile = storageContainer.BlobContainerClient.GetBlobClient(ExportFileNameDefault);
             Response<BlobDownloadInfo> download = await exportFile.DownloadAsync().ConfigureAwait(false);
-            string content = ReadStream(download.Value.Content);
-            return content;
+            return ReadStream(download.Value.Content);
         }
 
         private static string ReadStream(Stream stream)

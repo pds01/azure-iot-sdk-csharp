@@ -959,58 +959,86 @@ namespace Microsoft.Azure.Devices
 
         public override Task<JobProperties> ExportDevicesAsync(string exportBlobContainerUri, bool excludeKeys)
         {
-            return ExportDevicesAsync(exportBlobContainerUri, excludeKeys, CancellationToken.None);
+            return ExportDevicesAsync(
+                JobProperties.CreateForExportJob(
+                    exportBlobContainerUri,
+                    excludeKeys));
         }
 
         public override Task<JobProperties> ExportDevicesAsync(string exportBlobContainerUri, bool excludeKeys, CancellationToken ct)
         {
-            return ExportDevicesAsync(exportBlobContainerUri, null, excludeKeys, ct);
+            return ExportDevicesAsync(
+                JobProperties.CreateForExportJob(
+                    exportBlobContainerUri,
+                    excludeKeys),
+                ct);
         }
 
         public override Task<JobProperties> ExportDevicesAsync(string exportBlobContainerUri, string outputBlobName, bool excludeKeys)
         {
-            return ExportDevicesAsync(exportBlobContainerUri, outputBlobName, excludeKeys, CancellationToken.None);
+            return ExportDevicesAsync(
+                JobProperties.CreateForExportJob(
+                    exportBlobContainerUri,
+                    excludeKeys,
+                    outputBlobName));
         }
 
         public override Task<JobProperties> ExportDevicesAsync(string exportBlobContainerUri, string outputBlobName, bool excludeKeys, CancellationToken ct)
         {
-            var jobProperties = new JobProperties()
-            {
-                Type = JobType.ExportDevices,
-                OutputBlobContainerUri = exportBlobContainerUri,
-                ExcludeKeysInExport = excludeKeys,
-                OutputBlobName = outputBlobName,
-            };
+            return ExportDevicesAsync(
+                JobProperties.CreateForExportJob(
+                    exportBlobContainerUri,
+                    excludeKeys,
+                    outputBlobName),
+                ct);
+        }
 
-            return CreateJobAsync(jobProperties, ct);
+        public override Task<JobProperties> ExportDevicesAsync(JobProperties jobParameters, CancellationToken cancellationToken = default)
+        {
+            jobParameters.Type = JobType.ExportDevices;
+            return CreateJobAsync(jobParameters, cancellationToken);
         }
 
         public override Task<JobProperties> ImportDevicesAsync(string importBlobContainerUri, string outputBlobContainerUri)
         {
-            return ImportDevicesAsync(importBlobContainerUri, outputBlobContainerUri, CancellationToken.None);
+            return ImportDevicesAsync(
+                JobProperties.CreateForImportJob(
+                    importBlobContainerUri,
+                    outputBlobContainerUri));
         }
 
         public override Task<JobProperties> ImportDevicesAsync(string importBlobContainerUri, string outputBlobContainerUri, CancellationToken ct)
         {
-            return ImportDevicesAsync(importBlobContainerUri, outputBlobContainerUri, null, ct);
+            return ImportDevicesAsync(
+                JobProperties.CreateForImportJob(
+                    importBlobContainerUri,
+                    outputBlobContainerUri),
+                ct);
         }
 
         public override Task<JobProperties> ImportDevicesAsync(string importBlobContainerUri, string outputBlobContainerUri, string inputBlobName)
         {
-            return ImportDevicesAsync(importBlobContainerUri, outputBlobContainerUri, inputBlobName, CancellationToken.None);
+            return ImportDevicesAsync(
+                JobProperties.CreateForImportJob(
+                    importBlobContainerUri,
+                    outputBlobContainerUri,
+                    inputBlobName));
         }
 
         public override Task<JobProperties> ImportDevicesAsync(string importBlobContainerUri, string outputBlobContainerUri, string inputBlobName, CancellationToken ct)
         {
-            var jobProperties = new JobProperties()
-            {
-                Type = JobType.ImportDevices,
-                InputBlobContainerUri = importBlobContainerUri,
-                OutputBlobContainerUri = outputBlobContainerUri,
-                InputBlobName = inputBlobName,
-            };
+            return ImportDevicesAsync(
+                JobProperties.CreateForImportJob(
+                    importBlobContainerUri,
+                    outputBlobContainerUri,
+                    inputBlobName),
+                ct);
+        }
 
-            return CreateJobAsync(jobProperties, ct);
+        public override Task<JobProperties> ImportDevicesAsync(JobProperties jobParameters, CancellationToken cancellationToken = default)
+        {
+            jobParameters.Type = JobType.ImportDevices;
+            return CreateJobAsync(jobParameters, cancellationToken);
         }
 
         private Task<JobProperties> CreateJobAsync(JobProperties jobProperties, CancellationToken ct)
@@ -1022,8 +1050,22 @@ namespace Microsoft.Azure.Devices
                 { HttpStatusCode.Forbidden, responseMessage => Task.FromResult((Exception) new JobQuotaExceededException())}
             };
 
+            // The new api-version is only available in a few initial regions
+            // Control access via an environment variable. If a user wishes to try it out,
+            // they can set "EnabledStorageIdentity" to "1". Otherwise, the SDK will still
+            // default to the latest, broadly-supported api-version used in this SDK.
+            string clientApiVersion = ClientApiVersionHelper.ApiVersionQueryString;
+            if (ClientApiVersionHelper.EnableStorageIdentity)
+            {
+                clientApiVersion = ClientApiVersionHelper.ApiVersionQueryStringNext;
+            }
+            else
+            {
+                jobProperties.StorageAuthenticationType = null;
+            }
+
             return _httpClientHelper.PostAsync<JobProperties, JobProperties>(
-                GetJobUri("/create"),
+                GetJobUri("/create", clientApiVersion),
                 jobProperties,
                 errorMappingOverrides,
                 null,
@@ -1450,9 +1492,11 @@ namespace Microsoft.Azure.Devices
             return new Uri(RequestUriFormat.FormatInvariant(string.Empty, apiVersionQueryString), UriKind.Relative);
         }
 
-        private static Uri GetJobUri(string jobId)
+        // apiVersion parameter should be removed after the "next" api-version is available in all regions
+        // and go back to hard-coding
+        private static Uri GetJobUri(string jobId, string apiVersion = ClientApiVersionHelper.ApiVersionQueryString)
         {
-            return new Uri(JobsUriFormat.FormatInvariant(jobId, ClientApiVersionHelper.ApiVersionQueryString), UriKind.Relative);
+            return new Uri(JobsUriFormat.FormatInvariant(jobId, apiVersion), UriKind.Relative);
         }
 
         private static Uri GetDevicesRequestUri(int maxCount)
